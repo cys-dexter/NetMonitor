@@ -169,7 +169,6 @@ func (c *CaptureEngine) processPacket(packet gopacket.Packet) {
 
 	var (
 		srcMAC   net.HardwareAddr
-		dstMAC   net.HardwareAddr
 		srcIP    net.IP
 		dstIP    net.IP
 		ttl      uint8
@@ -181,7 +180,7 @@ func (c *CaptureEngine) processPacket(packet gopacket.Packet) {
 	if ethLayer := packet.Layer(layers.LayerTypeEthernet); ethLayer != nil {
 		if eth, ok := ethLayer.(*layers.Ethernet); ok {
 			srcMAC = eth.SrcMAC
-			dstMAC = eth.DstMAC
+			_ = eth.DstMAC // Safely ignore unused destination MAC
 		}
 	}
 
