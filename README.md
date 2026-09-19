@@ -10,7 +10,7 @@ NetMonitor is a defensive network monitoring tool written in Go 1.21. It provide
 ## Developer Attribution
 
 * **Developer:** Ahmad
-* **GitHub:** [Dexter-cys](https://github.com/Dexter-cys)
+* **GitHub:** [cys-dexter](https://github.com/cys-dexter)
 * **Project:** NetMonitor
 * **Language:** Go 1.21
 
