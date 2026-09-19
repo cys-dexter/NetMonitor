@@ -1,72 +1,519 @@
 # NetMonitor 🛡️🛰️
 
-[![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.21%2B-00ADD8?style=flat\&logo=go)](https://golang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-lightgrey)](https://github.com/cys-dexter/NetMonitor)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Defensive Network Monitoring & Protocol Diagnostics Tool**  
+**Defensive Network Monitoring & Protocol Diagnostics Tool**
 *Developed by Ahmad — GitHub: [@cys-dexter](https://github.com/cys-dexter)*
 
-**NetMonitor** is a high-performance defensive network monitoring tool written in Go 1.21. It provides real-time packet capture, passive operating system heuristics, intermediate hop/NAT indicator detection, 5-tuple connection flow tracking, and network hygiene auditing (cleartext protocols, DNS queries, and legacy resolution broadcasts) through an interactive Terminal User Interface (TUI) and structured JSON logging via `log/slog`.
+---
+
+## 📖 Overview
+
+**NetMonitor** is a high-performance defensive network monitoring and protocol diagnostics tool written in **Go 1.21+**.
+
+It provides real-time packet capture and analysis, passive operating-system fingerprinting, network-hop and NAT indicators, 5-tuple connection tracking, and network hygiene auditing.
+
+The application combines an interactive **Terminal User Interface (TUI)** with structured **JSON audit logging** powered by Go's `log/slog` package.
+
+NetMonitor is designed for **defensive monitoring, troubleshooting, network visibility, and security auditing** within authorized environments.
 
 ---
 
-## 👨‍💻 Developer Attribution
+## 👨‍💻 Developer
 
 * **Developer:** Ahmad
-* **GitHub:** [cys-dexter](https://github.com/cys-dexter)
+* **GitHub:** [@cys-dexter](https://github.com/cys-dexter)
 * **Project:** NetMonitor
-* **Language:** Go 1.21
+* **Language:** Go 1.21+
 
 ---
 
-## 🏗️ Architectural Layout
+## 🏗️ Architecture
 
-The codebase strictly adheres to a single-responsibility modular architecture:
+NetMonitor follows a modular, single-responsibility architecture in which each component has a clearly defined role.
 
 ```text
 netmonitor/
-├── config.go            # CLI flag parsing, configuration data structures, and validation
-├── logger.go            # Structured logging (log/slog) with dedicated file handler
-├── interfaces.go        # Device enumeration, IPv4/IPv6 extraction, and privilege checks
+├── config.go            # CLI flag parsing, configuration, and validation
+├── logger.go            # Structured logging with log/slog and file output
+├── interfaces.go        # Network interface discovery, IP extraction, and privilege checks
 ├── capture.go           # libpcap/gopacket capture engine, worker pool, and drop monitoring
-├── parser.go            # Protocol decoding, passive TTL OS heuristics, and hygiene audit
-├── oui.go               # Static 24-bit OUI database & hardware vendor classifier
-├── conntrack.go         # 5-tuple TCP/UDP flow tracking with bounded memory and auto-expiry
-├── stats.go             # Thread-safe telemetry store, Top Talkers, and event ring buffer
-├── ui.go                # Dual-mode split-screen TUI (Host Inventory & Connection Tracker)
-├── main.go              # Lean application bootstrap, dependency injection, and signal handling
-├── config_test.go       # Unit tests for CLI flags, defaults, and developer identity
-├── interfaces_test.go   # Unit tests for subnet classification and interface discovery
-├── parser_test.go       # Unit tests for TTL heuristics, OUI lookup, and protocol parsers
-├── stats_test.go        # Unit tests for statistics, ring buffer, drop telemetry, and conntrack
+├── parser.go            # Protocol decoding, TTL heuristics, and network hygiene analysis
+├── oui.go               # Static 24-bit OUI database and hardware vendor classification
+├── conntrack.go         # 5-tuple TCP/UDP flow tracking with bounded memory and expiration
+├── stats.go             # Thread-safe telemetry, top talkers, and event ring buffer
+├── ui.go                # Dual-mode split-screen Terminal User Interface
+├── main.go              # Application bootstrap, dependency injection, and signal handling
+├── config_test.go       # Configuration and CLI unit tests
+├── interfaces_test.go   # Interface discovery and subnet classification tests
+├── parser_test.go       # TTL, OUI, and protocol parser tests
+├── stats_test.go        # Statistics, ring buffer, drop telemetry, and conntrack tests
 ├── go.mod               # Go module dependencies
-└── README.md            # Comprehensive architecture and operator manual
-⚡ Core Capabilities & Detection Methodology1. Packet Sniffing & Header Parsing EngineCaptures raw frames on selected network interfaces in promiscuous mode using libpcap and gopacket.Decouples ingestion from analysis via an 8192-element buffered packet channel feeding 4 concurrent worker goroutines.Real-time drop telemetry tracks both kernel-level libpcap drops (handle.Stats()) and internal channel queue drops.Decodes L2 Ethernet headers, L3 IPv4/IPv6 headers, and L4 TCP/UDP/ICMP transport protocols.2. Passive OS Fingerprinting (Heuristic)Infers likely host operating systems based on standard initial Time-To-Live (TTL) baselines:Base ~64: Likely Linux / Unix / macOS / iOS / AndroidBase ~128: Likely Windows Desktop / ServerBase ~255: Likely Cisco / Solaris / Network InfrastructureCalculates estimated network hops traversed: $\text{Hops} = \text{InitialTTL} - \text{ObservedTTL}$.3. Network Anomaly & Hop IndicatorsIntermediate Hop / NAT Indicators: Flags packets originating on local private subnets (RFC 1918) that arrive with decremented TTL values (TTL == 63 or 127). These indicate an intermediate routing hop such as a tethered smartphone hotspot, rogue travel router, or virtual machine NAT bridge.Hardware/OS Discrepancy Indicators: Cross-references IEEE OUI vendor signatures against inferred host OS baselines (e.g., Apple hardware exhibiting Windows TTL signatures) to highlight potential virtual machine bridging or custom network stacks.Depleted TTL Indicators: Detects packets with critically low TTLs ($< 4$), pointing to potential routing loops or remote network paths.4. 5-Tuple Connection Tracking (Flow Engine)Bidirectional tracking of concurrent TCP and UDP conversations (Endpoint A <-> Endpoint B [Proto]).Tracks TCP state transitions (SYN_SENT, SYN_RECV, ESTABLISHED, FIN_WAIT, RESET), packet volume, byte counts, and duration.Enforces bounded memory: a background garbage collector evicts stale flows exceeding flow-timeout and caps concurrent flows at max-flows (default: 5,000).5. Network Hygiene & Compliance AuditingCleartext Protocols: Validates application-layer payloads for insecure protocols:Telnet (Port 23): Verified via IAC command sequences (0xFF) or terminal text.FTP (Port 21): Verified via FTP control verbs (USER, PASS, etc.) or response codes.HTTP (Port 80/8080): Verified via HTTP verbs (GET, POST, etc.) or HTTP response headers.POP3 (Port 110) & IMAP (Port 143): Cleartext email protocols.DNS Query Logging: Decodes UDP port 53 DNS questions, logging queried domains, record types (A, AAAA, PTR), and transaction IDs.Legacy Name Resolution: Identifies UDP port 5355 (LLMNR) and port 137 (NetBIOS-NS) broadcasts that should be disabled per CIS/NIST security benchmarks.6. Dual-Mode Terminal User Interface (TUI)Built with tview and tcell in a high-contrast split-screen format:Top Section: Real-time auto-scrolling security event log with color coding: Red (ALERT), Yellow (SUSPICIOUS), and Green (INFO).Bottom Section: Interactive dual-mode table:Mode A (Host Inventory): IP, MAC, Hardware Vendor, TTL, Inferred OS, Security Status, and Active Indicators.Mode B (Live Connection Tracker): Endpoint A, Endpoint B, Protocol, State, Packets, Volume, and Duration.Press t to toggle between Hosts and Live Connections.Press ? or h to display the About modal with developer credentials and heuristic disclaimers.⚠️ Heuristic & Analytical LimitationsHeuristics vs. Proof: Passive fingerprinting and anomaly detection are investigative indicators, not confirmed security incidents.TTL Customization: Initial TTL values are software-configurable (e.g., via sysctl net.ipv4.ip_default_ttl on Linux or Registry keys on Windows). Encapsulating traffic through VPNs or IPsec tunnels also alters observed TTL values.MAC Address Randomization: Modern mobile and desktop operating systems employ MAC randomization (RFC 7844) by default on Wi-Fi networks. OUI identification indicates the manufacturer registered to the MAC prefix, not absolute device identity.Promiscuous Mode on Switched Networks: Promiscuous mode packet capture on a standard switched Ethernet network only observes broadcast, multicast, and unicast traffic directed to or from the monitoring host. To inspect full segment traffic, configure a SPAN/mirror port on your network switch or connect to a network TAP.📦 Prerequisites & InstallationNetMonitor requires libpcap development libraries and Go 1.21+:Debian / Ubuntu:Bashsudo apt update
+└── README.md            # Project documentation and operator guide
+```
+
+---
+
+# ⚡ Core Capabilities
+
+## 1. Packet Capture & Protocol Analysis
+
+NetMonitor provides real-time packet capture and protocol decoding through `libpcap` and `gopacket`.
+
+Key capabilities include:
+
+* Captures raw network frames from a selected interface.
+* Supports promiscuous capture mode.
+* Uses an `8192`-element buffered packet channel to decouple packet ingestion from analysis.
+* Processes packets through **4 concurrent worker goroutines**.
+* Monitors packet drops at both the kernel/libpcap layer and internal processing queue.
+* Decodes:
+
+  * Ethernet / Layer 2 headers
+  * IPv4 / IPv6 / Layer 3 headers
+  * TCP
+  * UDP
+  * ICMP
+
+---
+
+## 2. Passive OS Fingerprinting
+
+NetMonitor uses **passive TTL-based heuristics** to estimate the likely operating-system family associated with observed traffic.
+
+Typical initial TTL baselines include:
+
+| Initial TTL | Likely Platform Family                     |
+| ----------- | ------------------------------------------ |
+| ~64         | Linux, Unix, macOS, iOS, Android           |
+| ~128        | Windows Desktop / Server                   |
+| ~255        | Cisco, Solaris, and network infrastructure |
+
+The estimated number of traversed hops is calculated using:
+
+```text
+Estimated Hops = Initial TTL - Observed TTL
+```
+
+These results are **heuristic indicators**, not definitive operating-system identification.
+
+---
+
+## 3. Network Anomaly & Hop Indicators
+
+NetMonitor analyzes packet metadata for indicators that may help identify unusual routing or network configurations.
+
+### Intermediate Hop / NAT Indicators
+
+Packets originating from private RFC 1918 address space may be flagged when their observed TTL suggests an additional routing hop, including common values such as:
+
+* `TTL = 63`
+* `TTL = 127`
+
+These patterns may be consistent with environments involving:
+
+* Mobile tethering or hotspot routing
+* Travel routers
+* Virtual-machine NAT bridges
+* Other intermediate routing configurations
+
+### Hardware / OS Discrepancy Indicators
+
+The tool cross-references:
+
+* IEEE OUI vendor information
+* Observed MAC prefixes
+* Passive TTL-based OS heuristics
+
+A mismatch can be surfaced as an **investigative indicator** that may warrant further examination.
+
+### Depleted TTL Indicators
+
+Packets with extremely low observed TTL values:
+
+```text
+TTL < 4
+```
+
+are flagged because they may indicate unusual routing paths, routing loops, or traffic traversing multiple network hops.
+
+---
+
+# 4. 5-Tuple Connection Tracking
+
+NetMonitor maintains bounded state for active TCP and UDP conversations using 5-tuple flow identification.
+
+Each tracked flow can include:
+
+* Source endpoint
+* Destination endpoint
+* Transport protocol
+* Packet count
+* Byte volume
+* Connection duration
+* TCP state
+
+TCP state transitions include:
+
+```text
+SYN_SENT
+SYN_RECV
+ESTABLISHED
+FIN_WAIT
+RESET
+```
+
+The connection tracker uses bounded memory management:
+
+* Configurable flow expiration through `flow-timeout`
+* Maximum concurrent flow limit through `max-flows`
+* Default maximum: **5,000 concurrent flows**
+* Background cleanup of stale connections
+
+---
+
+# 5. Network Hygiene & Protocol Auditing
+
+NetMonitor performs passive inspection of selected application-layer traffic to identify cleartext protocols and legacy name-resolution mechanisms.
+
+## Cleartext Protocol Detection
+
+### Telnet — Port 23
+
+Detection may be based on:
+
+* Telnet IAC command sequences (`0xFF`)
+* Recognizable terminal/session text
+
+### FTP — Port 21
+
+Detection may use:
+
+* FTP control commands such as `USER` and `PASS`
+* Standard FTP response codes
+
+### HTTP — Ports 80 / 8080
+
+Detection may use:
+
+* HTTP methods such as `GET` and `POST`
+* HTTP response headers
+
+### POP3 — Port 110
+
+Identifies unencrypted POP3 email traffic.
+
+### IMAP — Port 143
+
+Identifies unencrypted IMAP email traffic.
+
+---
+
+## DNS Monitoring
+
+NetMonitor decodes DNS queries transmitted over UDP port `53` and can log:
+
+* Queried domain names
+* DNS record types
+* Transaction IDs
+
+Common record types include:
+
+```text
+A
+AAAA
+PTR
+```
+
+---
+
+## Legacy Name Resolution
+
+The tool identifies legacy broadcast-based name-resolution traffic, including:
+
+* **LLMNR — UDP 5355**
+* **NetBIOS Name Service — UDP 137**
+
+These protocols may be reviewed as part of network-hardening and security-audit activities.
+
+---
+
+# 🖥️ 6. Terminal User Interface
+
+NetMonitor provides a high-contrast split-screen TUI built with `tview` and `tcell`.
+
+### Security Event Panel
+
+The upper section provides a real-time, auto-scrolling security event log.
+
+Events are categorized by severity:
+
+* 🔴 `ALERT`
+* 🟡 `SUSPICIOUS`
+* 🟢 `INFO`
+
+### Interactive Data Panel
+
+The lower section supports two views.
+
+#### Mode A — Host Inventory
+
+Displays information such as:
+
+* IP address
+* MAC address
+* Hardware vendor
+* Observed TTL
+* Inferred OS
+* Security status
+* Active indicators
+
+#### Mode B — Live Connection Tracker
+
+Displays:
+
+* Endpoint A
+* Endpoint B
+* Protocol
+* Connection state
+* Packet count
+* Traffic volume
+* Duration
+
+Press **`t`** to switch between the two views.
+
+Press **`?`** or **`h`** to open the About and keyboard-shortcuts dialog.
+
+---
+
+# ⚠️ Heuristic & Analytical Limitations
+
+NetMonitor's detection mechanisms should be treated as **investigative indicators rather than definitive security findings**.
+
+### TTL Is Not Proof of an Operating System
+
+Initial TTL values can be modified by software and operating-system configuration.
+
+For example, Linux systems may expose configurable IPv4 TTL settings, while tunneling technologies such as VPNs and IPsec can alter observed packet characteristics.
+
+### MAC Randomization
+
+Modern operating systems may use MAC-address randomization on Wi-Fi networks.
+
+Therefore, OUI analysis identifies the organization associated with a MAC prefix; it does **not** guarantee the physical or logical identity of a device.
+
+### Promiscuous Mode on Switched Networks
+
+Promiscuous mode does not automatically provide visibility into every packet traversing a modern switched network.
+
+A monitoring host will generally observe:
+
+* Broadcast traffic
+* Multicast traffic
+* Traffic addressed to or from the monitoring host
+
+For broader segment visibility, an authorized network administrator may configure:
+
+* A SPAN / mirror port
+* A network TAP
+* Another appropriate monitoring architecture
+
+---
+
+# 📦 Requirements
+
+NetMonitor requires:
+
+* **Go 1.21+**
+* **libpcap development libraries**
+* Linux or macOS
+* Appropriate privileges for raw packet capture
+
+---
+
+# 🛠️ Installation
+
+## Debian / Ubuntu
+
+```bash
+sudo apt update
 sudo apt install -y golang-go libpcap-dev
-RHEL / Fedora / CentOS:Bashsudo dnf install -y golang libpcap-devel
-Arch Linux:Bashsudo pacman -S go libpcap
-macOS (Homebrew):Bashbrew install go libpcap
-🛠️ Building & TestingBash# Clone the repository
-git clone [https://github.com/cys-dexter/NetMonitor.git](https://github.com/cys-dexter/NetMonitor.git)
+```
+
+## RHEL / Fedora / CentOS
+
+```bash
+sudo dnf install -y golang libpcap-devel
+```
+
+## Arch Linux
+
+```bash
+sudo pacman -S go libpcap
+```
+
+## macOS
+
+Using Homebrew:
+
+```bash
+brew install go libpcap
+```
+
+---
+
+# 🔨 Build & Test
+
+Clone the repository:
+
+```bash
+git clone https://github.com/cys-dexter/NetMonitor.git
 cd NetMonitor
+```
 
-# Download dependencies
+Download and synchronize dependencies:
+
+```bash
 go mod tidy
+```
 
-# Run comprehensive test suite
+Run the complete test suite:
+
+```bash
 go test -v ./...
+```
 
-# Build standalone binary
+Build the standalone binary:
+
+```bash
 go build -o netmonitor .
-🚀 Running NetMonitorNetMonitor requires raw socket access to capture packets in promiscuous mode.Option A: Run with sudo (Recommended)Bash# List discovered network interfaces
+```
+
+---
+
+# 🚀 Running NetMonitor
+
+Packet capture requires appropriate access to raw network interfaces.
+
+## Option A — Run with sudo
+
+List available network interfaces:
+
+```bash
 ./netmonitor -l
+```
 
-# Start monitoring on a specific interface
+Start monitoring on a specific interface:
+
+```bash
 sudo ./netmonitor -i eth0
+```
 
-# Monitor with a BPF filter and debug logging
-sudo ./netmonitor -i eth0 -f "not port 22" --log-level DEBUG --log-file ./audit.log
-Option B: Run without sudo (Linux Capabilities)Bashsudo setcap cap_net_raw,cap_net_admin=eip ./netmonitor
+Run with a BPF filter and debug logging:
+
+```bash
+sudo ./netmonitor \
+  -i eth0 \
+  -f "not port 22" \
+  --log-level DEBUG \
+  --log-file ./audit.log
+```
+
+---
+
+## Option B — Linux Capabilities
+
+On supported Linux systems, the binary can be granted the required capabilities instead of running the application as full root:
+
+```bash
+sudo setcap cap_net_raw,cap_net_admin=eip ./netmonitor
+```
+
+Then run:
+
+```bash
 ./netmonitor -i eth0
-🎛️ CLI FlagsFlagLong FlagDefaultDescription-i--interfaceAutoInterface to monitor. Auto-selects active default route if omitted.-l--listfalseList discovered network devices and IP addresses, then exit.-f--filter""Berkeley Packet Filter (BPF) string (e.g., "tcp or udp").-p--no-promiscfalseDisable promiscuous capture mode.-v--versionfalseDisplay NetMonitor version and developer information.--log-filenetmonitor.logDestination path for structured JSON audit logs.--log-levelINFOLogging threshold (DEBUG, INFO, WARN, ERROR).--max-flows5000Maximum concurrent connections tracked before eviction.⌨️ TUI Keyboard ShortcutsKeyActionq / Ctrl+CGracefully terminate packet capture and exit the application.tToggle View: Switch bottom panel between Active Host Inventory and Live Connection Tracker.? / hAbout Modal: Display tool information, developer attribution, and keybinding guide.cClear the event log view and flush the security event ring buffer.TabSwitch active focus between the Security Events panel and the bottom table.↑ / ↓Navigate table rows or scroll history in the event log.🔐 Security & Privacy ConsiderationsData Exposure: NetMonitor captures network headers and previews unencrypted payloads strictly to detect insecure communication protocols. Ensure monitoring is conducted in compliance with organizational acceptable-use policies and local privacy regulations.Privilege Separation: Running NetMonitor with setcap cap_net_raw,cap_net_admin=eip is preferable to executing as full root when possible.Log Security: Structured logs contain network metadata and should be protected with appropriate file permissions (chmod 0600).
+```
+
+Use the least-privilege approach appropriate for your environment and security policy.
+
+---
+
+# 🎛️ CLI Options
+
+| Short | Long Flag      | Default          | Description                                                                               |
+| ----- | -------------- | ---------------- | ----------------------------------------------------------------------------------------- |
+| `-i`  | `--interface`  | Auto             | Network interface to monitor. Automatically selects an active default route when omitted. |
+| `-l`  | `--list`       | `false`          | Lists discovered network interfaces and IP addresses, then exits.                         |
+| `-f`  | `--filter`     | `""`             | Berkeley Packet Filter (BPF), e.g. `"tcp or udp"`.                                        |
+| `-p`  | `--no-promisc` | `false`          | Disables promiscuous capture mode.                                                        |
+| `-v`  | `--version`    | `false`          | Displays NetMonitor version and developer information.                                    |
+| —     | `--log-file`   | `netmonitor.log` | Output path for structured JSON audit logs.                                               |
+| —     | `--log-level`  | `INFO`           | Logging threshold: `DEBUG`, `INFO`, `WARN`, or `ERROR`.                                   |
+| —     | `--max-flows`  | `5000`           | Maximum number of concurrent tracked flows.                                               |
+
+---
+
+# ⌨️ Keyboard Shortcuts
+
+| Key            | Action                                                           |
+| -------------- | ---------------------------------------------------------------- |
+| `q` / `Ctrl+C` | Gracefully stop packet capture and exit NetMonitor.              |
+| `t`            | Toggle between Host Inventory and Live Connection Tracker.       |
+| `?` / `h`      | Open the About dialog and keyboard-shortcut guide.               |
+| `c`            | Clear the event log and flush the security-event ring buffer.    |
+| `Tab`          | Move focus between the Security Events panel and the data table. |
+| `↑` / `↓`      | Navigate table rows or scroll through event history.             |
+
+---
+
+# 🔐 Security & Privacy Considerations
+
+NetMonitor is intended for **authorized defensive monitoring and diagnostics**.
+
+### Captured Data
+
+The application may inspect network headers and limited unencrypted payload information when required for protocol identification.
+
+Only monitor networks and systems for which you have appropriate authorization.
+
+### Privilege Separation
+
+Where supported, using Linux capabilities such as:
+
+```text
+cap_net_raw
+cap_net_admin
+```
+
+can reduce the need to run the entire application as `root`.
+
+### Log Protection
+
+Structured audit logs may contain sensitive network metadata.
+
+Protect log files with appropriate filesystem permissions, for example:
+
+```bash
+chmod 0600 netmonitor.log
+```
+
+Review organizational policies and applicable privacy requirements before deploying the tool in production environments.
+
+---
+
+## 📄 License
+
+NetMonitor is released under the **MIT License**.
+
+---
+
+## 👨‍💻 Author
+
+**Ahmad**
+
+GitHub: [@cys-dexter](https://github.com/cys-dexter)
+
+**NetMonitor — Defensive Network Visibility & Protocol Diagnostics**
