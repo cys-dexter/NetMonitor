@@ -1,31 +1,37 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 )
 
 // OUIVendor stores vendor metadata associated with an Organizationally Unique Identifier.
 type OUIVendor struct {
-	Name     string
-	Category string // "workstation", "server", "network_gear", "mobile_iot", "virtual_machine", "general"
+	Name     string `json:"name"`
+	Category string `json:"category"` // "workstation", "server", "network_gear", "mobile_iot", "virtual_machine", "general"
+}
+
+// DeviceInfo represents complete network host metadata including threat/suspicious analysis.
+type DeviceInfo struct {
+	IP          string `json:"ip"`
+	MAC         string `json:"mac"`
+	Vendor      string `json:"vendor"`
+	Category    string `json:"category"`
+	TTL         int    `json:"ttl"`
+	OSGuess     string `json:"os_guess"`
+	IsSuspicious bool  `json:"is_suspicious"`
+	Reason      string `json:"suspicious_reason,omitempty"`
 }
 
 // Mutex for safe concurrent writes/reads to ouiDatabase
 var ouiMutex sync.RWMutex
 
 // ouiDatabase provides a static lookup table mapping 24-bit OUI prefixes to manufacturer metadata.
-//
-// SOURCE: Derived from the IEEE Standards Association OUI Public Registry snapshot.
-//
-// HEURISTIC DISCLAIMER:
-// OUI lookups reflect the organization assigned to the 24-bit hardware MAC prefix.
-// Modern operating systems (iOS, Android, Windows 10/11, macOS) employ MAC Address Randomization
-// (RFC 7844) by default for Wi-Fi associations. Furthermore, MAC addresses can be trivially spoofed
-// at Layer 2. Consequently, OUI information should be treated as an indicator, not definitive proof
-// of hardware identity.
 var ouiDatabase = map[string]OUIVendor{
 	// Apple, Inc.
 	"00:03:93": {Name: "Apple, Inc.", Category: "workstation"},
@@ -330,7 +336,6 @@ func LookupVendor(mac net.HardwareAddr) (string, string) {
 	}
 
 	// Check if this is a locally administered / randomized address (bit 1 of 1st byte set: x2, x6, xA, xE)
-	// Commonly used by modern iOS / Android / Windows Wi-Fi MAC randomization (RFC 7844)
 	if (mac[0] & 0x02) != 0 {
 		return "Randomized / Locally Administered MAC", "workstation"
 	}
@@ -339,7 +344,6 @@ func LookupVendor(mac net.HardwareAddr) (string, string) {
 }
 
 // LookupVendorByString allows lookup using a raw string MAC address.
-// It normalizes formatting automatically (supports 00-11-22-33-44-55, 0011.2233.4455, etc.)
 func LookupVendorByString(macStr string) (string, string, error) {
 	mac, err := net.ParseMAC(macStr)
 	if err != nil {
@@ -350,7 +354,6 @@ func LookupVendorByString(macStr string) (string, string, error) {
 }
 
 // AddVendor dynamically registers or overrides an OUI in the database during runtime.
-// ouiPrefix format should be "aa:bb:cc" or "AA-BB-CC"
 func AddVendor(ouiPrefix string, name string, category string) {
 	formatted := strings.ToLower(strings.ReplaceAll(ouiPrefix, "-", ":"))
 	if len(formatted) > 8 {
@@ -363,4 +366,195 @@ func AddVendor(ouiPrefix string, name string, category string) {
 		Category: category,
 	}
 	ouiMutex.Unlock()
+}
+
+// PredictOSByTTL guesses system type based on Time To Live (TTL) values.
+func PredictOSByTTL(ttl int) string {
+	switch {
+	case ttl <= 0:
+		return "Unknown"
+	case ttl <= 64:
+		return "Linux / Android / iOS / MacOS"
+	case ttl <= 128:
+		return "Windows OS"
+	case ttl <= 255:
+		return "Cisco / Network Router / Unix"
+	default:
+		return "Custom Embedded / Unknown"
+	}
+}
+
+// AnalyzeDevice evaluates MAC, IP, TTL, and Category to detect suspicious behavior.
+func AnalyzeDevice(ipStr, macStr string, ttl int) DeviceInfo {
+	vendor, category, err := LookupVendorByString(macStr)
+	if err != nil {
+		return DeviceInfo{
+			IP:           ipStr,
+			MAC:          macStr,
+			Vendor:       "Invalid MAC",
+			Category:     "unknown",
+			TTL:          ttl,
+			OSGuess:      "Unknown",
+			IsSuspicious: true,
+			Reason:       "Malformed or invalid MAC format",
+		}
+	}
+
+	osGuess := PredictOSByTTL(ttl)
+	isSuspicious := false
+	reasons := []string{}
+
+	// Suspicious Check 1: Spoofed or Randomized MAC Address
+	if strings.Contains(vendor, "Randomized") {
+		isSuspicious = true
+		reasons = append(reasons, "Randomized/Locally-Administered MAC (Possible MAC Spoofing)")
+	}
+
+	// Suspicious Check 2: Unregistered / Unknown Vendor
+	if strings.Contains(vendor, "Unknown Vendor") {
+		isSuspicious = true
+		reasons = append(reasons, "Unregistered OUI Vendor Prefix")
+	}
+
+	// Suspicious Check 3: TTL Mismatch (e.g. Windows vendor with Linux TTL)
+	if strings.Contains(vendor, "Microsoft") && ttl <= 64 {
+		isSuspicious = true
+		reasons = append(reasons, "TTL Mismatch: Microsoft OUI with Linux/Unix TTL Signature")
+	}
+
+	return DeviceInfo{
+		IP:           ipStr,
+		MAC:          macStr,
+		Vendor:       vendor,
+		Category:     category,
+		TTL:          ttl,
+		OSGuess:      osGuess,
+		IsSuspicious: isSuspicious,
+		Reason:       strings.Join(reasons, " | "),
+	}
+}
+
+// PrintDeviceTable outputs device details into a clean CLI dashboard.
+func PrintDeviceTable(devices []DeviceInfo) {
+	fmt.Println("\n=========================================================================================================")
+	fmt.Printf("%-15s | %-17s | %-24s | %-12s | %-4s | %-10s\n", "IP Address", "MAC Address", "Vendor / Manufacturer", "Category", "TTL", "Status")
+	fmt.Println("---------------------------------------------------------------------------------------------------------")
+
+	for _, d := range devices {
+		status := "🟢 OK"
+		if d.IsSuspicious {
+			status = "⚠️ [SUSPICIOUS]"
+		}
+		fmt.Printf("%-15s | %-17s | %-24s | %-12s | %-4d | %-10s\n", d.IP, d.MAC, truncate(d.Vendor, 24), d.Category, d.TTL, status)
+		if d.IsSuspicious {
+			fmt.Printf("   └── 🚩 Reason: %s\n", d.Reason)
+		}
+	}
+	fmt.Println("=========================================================================================================\n")
+}
+
+func truncate(str string, maxLen int) string {
+	if len(str) > maxLen {
+		return str[:maxLen-3] + "..."
+	}
+	return str
+}
+
+func main() {
+	scanner := bufio.NewScanner(os.Stdin)
+
+	// Sample network dataset to simulate discovery
+	sampleNetwork := []DeviceInfo{
+		AnalyzeDevice("192.168.1.1", "00:00:0c:11:22:33", 255),  // Cisco Router
+		AnalyzeDevice("192.168.1.10", "00:03:93:aa:bb:cc", 64),   // Apple Mac
+		AnalyzeDevice("192.168.1.15", "00:15:5d:01:02:03", 128),  // Hyper-V VM
+		AnalyzeDevice("192.168.1.50", "02:11:22:33:44:55", 64),   // Randomized MAC (Suspicious)
+		AnalyzeDevice("192.168.1.99", "00:0d:3a:44:55:66", 64),   // Microsoft OUI with Linux TTL (Suspicious Mismatch)
+		AnalyzeDevice("192.168.1.100", "e4:5f:01:aa:bb:cc", 64),  // Raspberry Pi
+	}
+
+	for {
+		fmt.Println("==============================================")
+		fmt.Println("    NETWORK DEVICE ANALYZER & OUI SCANNER    ")
+		fmt.Println("==============================================")
+		fmt.Println("1. Show Sample Network Scan (IP, MAC, TTL, Threat Check)")
+		fmt.Println("2. Analyze Single MAC Address")
+		fmt.Println("3. Analyze Manual Network Device (IP + MAC + TTL)")
+		fmt.Println("4. Add New Vendor to OUI Database")
+		fmt.Println("5. Export Sample Scan to JSON")
+		fmt.Println("0. Exit (إغلاق / خروج)")
+		fmt.Println("==============================================")
+		fmt.Print("Choose an option: ")
+
+		if !scanner.Scan() {
+			break
+		}
+		choice := strings.TrimSpace(scanner.Text())
+
+		switch choice {
+		case "1":
+			PrintDeviceTable(sampleNetwork)
+
+		case "2":
+			fmt.Print("Enter MAC Address (e.g. 00:11:22:33:44:55): ")
+			scanner.Scan()
+			macInput := strings.TrimSpace(scanner.Text())
+			vendor, category, err := LookupVendorByString(macInput)
+			if err != nil {
+				fmt.Printf("Error: %v\n\n", err)
+			} else {
+				fmt.Printf("\nResult: Vendor = %s | Category = %s\n\n", vendor, category)
+			}
+
+		case "3":
+			fmt.Print("Enter IP Address: ")
+			scanner.Scan()
+			ip := strings.TrimSpace(scanner.Text())
+
+			fmt.Print("Enter MAC Address: ")
+			scanner.Scan()
+			mac := strings.TrimSpace(scanner.Text())
+
+			fmt.Print("Enter TTL Value (e.g. 64, 128, 255): ")
+			scanner.Scan()
+			var ttl int
+			fmt.Sscanf(scanner.Text(), "%d", &ttl)
+
+			dev := AnalyzeDevice(ip, mac, ttl)
+			PrintDeviceTable([]DeviceInfo{dev})
+
+		case "4":
+			fmt.Print("Enter OUI Prefix (e.g. AA:BB:CC): ")
+			scanner.Scan()
+			oui := strings.TrimSpace(scanner.Text())
+
+			fmt.Print("Enter Vendor Name: ")
+			scanner.Scan()
+			vName := strings.TrimSpace(scanner.Text())
+
+			fmt.Print("Enter Category (workstation/server/network_gear/mobile_iot/virtual_machine): ")
+			scanner.Scan()
+			cat := strings.TrimSpace(scanner.Text())
+
+			AddVendor(oui, vName, cat)
+			fmt.Println("Successfully added vendor to OUI database!\n")
+
+		case "5":
+			jsonData, err := json.MarshalIndent(sampleNetwork, "", "  ")
+			if err != nil {
+				fmt.Printf("Failed to export: %v\n", err)
+			} else {
+				fmt.Println("\n--- JSON EXPORT ---")
+				fmt.Println(string(jsonData))
+				fmt.Println("-------------------\n")
+			}
+
+		case "0", "q", "exit", "خروج":
+			fmt.Println("\nExiting application... Goodbye!")
+			os.Exit(0)
+
+		default:
+			fmt.Println("\nInvalid option! Please try again.\n")
+		}
+	}
 }
