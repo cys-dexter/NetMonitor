@@ -22,7 +22,7 @@ const (
  | |\  |  __/ |_| |  | | (_) | | | | | || (_) | |   
  |_| \_|\___|\__|_|  |_|\___/|_| |_|_|\__\___/|_|   
  Defensive Network Monitoring & Protocol Diagnostics
- NetMonitor — Developed by Ahmad | GitHub: Dexter-cys
+ NetMonitor — Developed by Ahmad | GitHub: cys-dexter
 `
 )
 
