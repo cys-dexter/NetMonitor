@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 )
 
 // OUIVendor stores vendor metadata associated with an Organizationally Unique Identifier.
@@ -11,6 +12,9 @@ type OUIVendor struct {
 	Name     string
 	Category string // "workstation", "server", "network_gear", "mobile_iot", "virtual_machine", "general"
 }
+
+// Mutex for safe concurrent writes/reads to ouiDatabase
+var ouiMutex sync.RWMutex
 
 // ouiDatabase provides a static lookup table mapping 24-bit OUI prefixes to manufacturer metadata.
 //
@@ -315,7 +319,13 @@ func LookupVendor(mac net.HardwareAddr) (string, string) {
 
 	// Format OUI prefix as aa:bb:cc (lowercase)
 	prefix := fmt.Sprintf("%02x:%02x:%02x", mac[0], mac[1], mac[2])
-	if vendor, found := ouiDatabase[strings.ToLower(prefix)]; found {
+
+	// Safe read from database
+	ouiMutex.RLock()
+	vendor, found := ouiDatabase[strings.ToLower(prefix)]
+	ouiMutex.RUnlock()
+
+	if found {
 		return vendor.Name, vendor.Category
 	}
 
@@ -326,4 +336,31 @@ func LookupVendor(mac net.HardwareAddr) (string, string) {
 	}
 
 	return "Unknown Vendor (Unregistered OUI)", "unknown"
+}
+
+// LookupVendorByString allows lookup using a raw string MAC address.
+// It normalizes formatting automatically (supports 00-11-22-33-44-55, 0011.2233.4455, etc.)
+func LookupVendorByString(macStr string) (string, string, error) {
+	mac, err := net.ParseMAC(macStr)
+	if err != nil {
+		return "Invalid MAC Address", "unknown", err
+	}
+	vendor, category := LookupVendor(mac)
+	return vendor, category, nil
+}
+
+// AddVendor dynamically registers or overrides an OUI in the database during runtime.
+// ouiPrefix format should be "aa:bb:cc" or "AA-BB-CC"
+func AddVendor(ouiPrefix string, name string, category string) {
+	formatted := strings.ToLower(strings.ReplaceAll(ouiPrefix, "-", ":"))
+	if len(formatted) > 8 {
+		formatted = formatted[:8]
+	}
+
+	ouiMutex.Lock()
+	ouiDatabase[formatted] = OUIVendor{
+		Name:     name,
+		Category: category,
+	}
+	ouiMutex.Unlock()
 }
