@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	AppVersion   = "1.1.0"
+	AppVersion   = "1.0"
 	AppDeveloper = "Ahmad"
-	AppGitHub    = "Dexter-cys"
-	AppBranding  = "NetMonitor — Developed by Ahmad | GitHub: Dexter-cys"
+	AppGitHub    = "cys-dexter"
+	AppBranding  = "NetMonitor — Developed by Ahmad | GitHub: cys-dexter"
 
 	AppBanner = `
   _   _      _   __  __             _ _             
