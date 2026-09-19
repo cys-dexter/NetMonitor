@@ -1,7 +1,7 @@
 # NetMonitor 🛡️🛰️
 
 **Defensive Network Monitoring & Protocol Diagnostics Tool**  
-**Developed by Ahmad — GitHub: [Dexter-cys](https://github.com/Dexter-cys)**
+**Developed by Ahmad — GitHub: [cys-dexter](https://github.com/cys-dexter)**
 
 NetMonitor is a defensive network monitoring tool written in Go 1.21. It provides real-time packet capture, passive operating system heuristics, intermediate hop/NAT indicator detection, 5-tuple connection flow tracking, and network hygiene auditing (cleartext protocols, DNS queries, and legacy resolution broadcasts) through an interactive Terminal User Interface (TUI) and structured JSON logging via `log/slog`.
 
